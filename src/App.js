@@ -31,10 +31,10 @@ const App = () => {
   // Stability monitoring settings
   const [stabilitySettings, setStabilitySettings] = useState({
     enabled: true,
-    energyThreshold: 0.1,      // 10% energy change
-    velocityThreshold: 50,     // Maximum velocity
-    positionGrowthThreshold: 5, // 5x position growth
-    positionBoundThreshold: 100 // Absolute position limit
+    energyThreshold: 0.25,     // 25% energy change (more relaxed)
+    velocityThreshold: 100,    // Maximum velocity (doubled)
+    positionGrowthThreshold: 10, // 10x position growth (doubled)
+    positionBoundThreshold: 250 // Absolute position limit (2.5x higher)
   });
   
   // Dynamic slider ranges that expand when reaching boundaries
