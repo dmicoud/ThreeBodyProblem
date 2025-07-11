@@ -45,8 +45,12 @@ const App = () => {
   const [trailLength, setTrailLength] = useState(100);
   const [showVelocityVectors, setShowVelocityVectors] = useState(false);
   const [resetTrigger, setResetTrigger] = useState(0);
-  const [useServerComputation, setUseServerComputation] = useState(true);
+  const [useServerComputation, setUseServerComputation] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [configModalMode, setConfigModalMode] = useState('export'); // 'export' or 'import'
+  const [configText, setConfigText] = useState('');
   const simulationRef = useRef(null);
+  const canvasRef = useRef(null);
   
   // Convert between logarithmic slider value and actual speed
   const speedToSlider = (speed) => Math.log10(speed);
@@ -109,6 +113,120 @@ const App = () => {
     }
   }, [useServerComputation, isRunning]);
 
+  // Export current configuration
+  const handleExportConfig = () => {
+    const config = {
+      bodies: bodies.map(body => ({
+        id: body.id,
+        x: parseFloat(body.x.toFixed(6)),
+        y: parseFloat(body.y.toFixed(6)),
+        vx: parseFloat(body.vx.toFixed(6)),
+        vy: parseFloat(body.vy.toFixed(6)),
+        mass: parseFloat(body.mass.toFixed(6)),
+        color: body.color
+      })),
+      timeSpeed,
+      trailLength,
+      showVelocityVectors,
+      useServerComputation,
+      exportedAt: new Date().toISOString(),
+      description: "3-Body Problem Configuration"
+    };
+    
+    setConfigText(JSON.stringify(config, null, 2));
+    setConfigModalMode('export');
+    setShowConfigModal(true);
+  };
+
+  // Import configuration
+  const handleImportConfig = () => {
+    setConfigText('');
+    setConfigModalMode('import');
+    setShowConfigModal(true);
+  };
+
+  // Apply imported configuration
+  const handleApplyConfig = () => {
+    try {
+      const config = JSON.parse(configText);
+      
+      // Validate configuration structure
+      if (!config.bodies || !Array.isArray(config.bodies) || config.bodies.length !== 3) {
+        throw new Error('Configuration must contain exactly 3 bodies');
+      }
+      
+      // Validate each body
+      config.bodies.forEach((body, index) => {
+        const required = ['id', 'x', 'y', 'vx', 'vy', 'mass', 'color'];
+        required.forEach(field => {
+          if (body[field] === undefined || body[field] === null) {
+            throw new Error(`Body ${index + 1} missing required field: ${field}`);
+          }
+        });
+        
+        // Validate numeric fields
+        const numeric = ['x', 'y', 'vx', 'vy', 'mass'];
+        numeric.forEach(field => {
+          if (typeof body[field] !== 'number' || isNaN(body[field])) {
+            throw new Error(`Body ${index + 1} field ${field} must be a valid number`);
+          }
+        });
+      });
+      
+      // Stop simulation if running
+      if (isRunning) {
+        setIsRunning(false);
+        if (simulationRef.current) {
+          simulationRef.current.pause();
+        }
+      }
+      
+      // Apply configuration
+      setBodies(config.bodies);
+      if (typeof config.timeSpeed === 'number') setTimeSpeed(config.timeSpeed);
+      if (typeof config.trailLength === 'number') setTrailLength(config.trailLength);
+      if (typeof config.showVelocityVectors === 'boolean') setShowVelocityVectors(config.showVelocityVectors);
+      if (typeof config.useServerComputation === 'boolean') setUseServerComputation(config.useServerComputation);
+      
+      // Reset simulation with new configuration
+      setResetTrigger(prev => prev + 1);
+      if (simulationRef.current) {
+        simulationRef.current.setInitialBodies(config.bodies);
+        simulationRef.current.reset();
+      }
+      
+      // Recalculate viewport to fit new body positions
+      setTimeout(() => {
+        if (canvasRef.current) {
+          canvasRef.current.recalculateViewport();
+        }
+      }, 100); // Small delay to ensure bodies are updated
+      
+      setShowConfigModal(false);
+      setConfigText('');
+      
+    } catch (error) {
+      alert(`Error importing configuration: ${error.message}`);
+    }
+  };
+
+  // Copy configuration to clipboard
+  const handleCopyConfig = async () => {
+    try {
+      await navigator.clipboard.writeText(configText);
+      alert('Configuration copied to clipboard!');
+    } catch (error) {
+      // Fallback for older browsers
+      const textArea = document.createElement('textarea');
+      textArea.value = configText;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      alert('Configuration copied to clipboard!');
+    }
+  };
+
   return (
     <div className="app">
       <h1>3-Body Problem Simulator</h1>
@@ -116,10 +234,13 @@ const App = () => {
       <div className="main-content">
         <div className="visualization">
           <Canvas 
+            ref={canvasRef}
             bodies={bodies} 
             clearTrails={resetTrigger} 
             trailLength={trailLength}
             showVelocityVectors={showVelocityVectors}
+            isRunning={isRunning}
+            onBodyChange={handleBodyChange}
           />
           <Simulation 
             ref={simulationRef}
@@ -140,6 +261,22 @@ const App = () => {
             </button>
             <button onClick={handleReset} className="control-button">
               Reset
+            </button>
+            <button 
+              onClick={handleExportConfig} 
+              className="control-button config-button"
+              disabled={isRunning}
+              title="Export current configuration"
+            >
+              Export Config
+            </button>
+            <button 
+              onClick={handleImportConfig} 
+              className="control-button config-button"
+              disabled={isRunning}
+              title="Import configuration"
+            >
+              Import Config
             </button>
             
             <div className="velocity-toggle">
@@ -208,6 +345,70 @@ const App = () => {
           </div>
         </div>
       </div>
+      
+      {/* Configuration Modal */}
+      {showConfigModal && (
+        <div className="modal-overlay" onClick={() => setShowConfigModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                {configModalMode === 'export' ? 'Export Configuration' : 'Import Configuration'}
+              </h3>
+              <button 
+                className="modal-close" 
+                onClick={() => setShowConfigModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="modal-body">
+              {configModalMode === 'export' ? (
+                <>
+                  <p>Copy this configuration to save your current system state:</p>
+                  <textarea
+                    value={configText}
+                    readOnly
+                    className="config-textarea"
+                    rows={15}
+                  />
+                  <div className="modal-buttons">
+                    <button onClick={handleCopyConfig} className="control-button">
+                      Copy to Clipboard
+                    </button>
+                    <button onClick={() => setShowConfigModal(false)} className="control-button">
+                      Close
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>Paste a configuration JSON to load a saved system state:</p>
+                  <textarea
+                    value={configText}
+                    onChange={(e) => setConfigText(e.target.value)}
+                    placeholder="Paste configuration JSON here..."
+                    className="config-textarea"
+                    rows={15}
+                  />
+                  <div className="modal-buttons">
+                    <button 
+                      onClick={handleApplyConfig} 
+                      className="control-button"
+                      disabled={!configText.trim()}
+                    >
+                      Apply Configuration
+                    </button>
+                    <button onClick={() => setShowConfigModal(false)} className="control-button">
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

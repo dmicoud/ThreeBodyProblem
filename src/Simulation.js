@@ -9,6 +9,7 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
   const physicsEngineRef = useRef(new PhysicsEngine());
   const animationIdRef = useRef(null);
   const isClientRunningRef = useRef(false);
+  const timeSpeedRef = useRef(timeSpeed);
 
   // Initialize initialBodiesRef with current bodies on mount
   useEffect(() => {
@@ -98,8 +99,8 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
   const clientAnimate = () => {
     if (!isClientRunningRef.current) return;
     
-    // Update physics
-    bodiesRef.current = physicsEngineRef.current.step(bodiesRef.current, timeSpeed);
+    // Update physics using current time speed
+    bodiesRef.current = physicsEngineRef.current.step(bodiesRef.current, timeSpeedRef.current);
     
     // Update bodies in parent component
     onBodiesUpdate(bodiesRef.current);
@@ -175,8 +176,9 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
     }
   }, [bodies, isRunning]);
 
-  // Send time speed updates to server
+  // Update time speed ref and send to server
   useEffect(() => {
+    timeSpeedRef.current = timeSpeed;
     if (isConnectedRef.current && useServerComputation) {
       sendMessage({ type: 'set_time_speed', timeSpeed });
     }
