@@ -18,7 +18,7 @@ class PhysicsSimulation {
     this.timeSpeed = 1;
     this.animationId = null;
     this.G = 1; // Gravitational constant (unit value for figure-8, matches paper)
-    this.baseDt = 0.001; // Much smaller time step for stability
+    this.baseDt = 0.0005; // Smaller time step for better stability during close approaches
     this.connections = new Set(); // Track WebSocket connections
     this.iterations = 0; // Track total iterations
   }
@@ -62,16 +62,20 @@ class PhysicsSimulation {
 
   calculateAccelerations(bodies) {
     const accelerations = bodies.map(() => ({ ax: 0, ay: 0 }));
+    const softening = 0.05; // Softening parameter to prevent numerical instabilities
     
     for (let i = 0; i < bodies.length; i++) {
       for (let j = i + 1; j < bodies.length; j++) {
         const dx = bodies[j].x - bodies[i].x;
         const dy = bodies[j].y - bodies[i].y;
-        const r = Math.sqrt(dx * dx + dy * dy);
+        const r2 = dx * dx + dy * dy;
         
-        // Collision detection disabled - allow all force calculations
+        // Add softening parameter to prevent numerical instabilities
+        // Instead of F = G*m1*m2/r², we use F = G*m1*m2/(r² + ε²)
+        const softened_r2 = r2 + softening * softening;
+        const r = Math.sqrt(softened_r2);
         
-        const force = this.G * bodies[i].mass * bodies[j].mass / (r * r);
+        const force = this.G * bodies[i].mass * bodies[j].mass / softened_r2;
         const fx = force * dx / r;
         const fy = force * dy / r;
         

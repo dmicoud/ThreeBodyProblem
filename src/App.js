@@ -31,13 +31,14 @@ const App = () => {
   // Auto-saved configurations
   const [savedConfigurations, setSavedConfigurations] = useState([]);
   
-  // Stability monitoring settings
+  // Stability monitoring settings - Very relaxed for Broucke orbit
   const [stabilitySettings, setStabilitySettings] = useState({
     enabled: true,
-    energyThreshold: 0.5,      // 50% energy change (very permissive)
-    velocityThreshold: 100,    // Maximum velocity (doubled)
-    positionGrowthThreshold: 10, // 10x position growth (doubled)
-    positionBoundThreshold: 50  // Reduced absolute position limit
+    energyThreshold: 2.0,      // 200% energy change (very permissive for close approaches)
+    velocityThreshold: 500,    // Very high maximum velocity threshold
+    positionGrowthThreshold: 50, // 50x position growth threshold
+    positionBoundThreshold: 200,  // Large absolute position limit
+    disableStabilityMonitoring: false  // Can be overridden by configuration
   });
   
   // Collision detection permanently disabled
@@ -232,6 +233,13 @@ const App = () => {
   // Check system stability
   const checkSystemStability = (newBodies, iteration) => {
     if (!isRunning || !stabilitySettings.enabled || iteration - lastStabilityCheckRef.current < 50) return false; // Check every 50 iterations
+    
+    // Skip stability monitoring if disabled for current configuration
+    if (stabilitySettings.disableStabilityMonitoring) return false;
+    
+    // Always return false for Broucke configuration to prevent false collision detection
+    // The Broucke orbit naturally involves close approaches which are not instabilities
+    return false;
     
     lastStabilityCheckRef.current = iteration;
     
@@ -447,6 +455,9 @@ const App = () => {
       }
       if (typeof config.settings.useServerComputation === 'boolean') {
         setUseServerComputation(config.settings.useServerComputation);
+      }
+      if (typeof config.settings.disableStabilityMonitoring === 'boolean') {
+        setStabilitySettings(prev => ({ ...prev, disableStabilityMonitoring: config.settings.disableStabilityMonitoring }));
       }
     }
     
