@@ -5,44 +5,36 @@ import Canvas from './Canvas';
 
 const App = () => {
   // Figure-eight stable 3-body problem initial conditions (Chenciner-Montgomery)
-  // Properly scaled to maintain the mathematical relationship
-  const scale = 150; // Position scale factor for visualization
-  const centerX = 300; // Canvas center X
-  const centerY = 200; // Canvas center Y
-  
-  // The original solution velocities (from the mathematical paper)
-  const vx_base = 0.466203685;
-  const vy_base = 0.43236573;
-  
-  // Velocity scaling to match our G=0.1 and time step
-  const velocityScale = 1.5;
+  // Based on the exact values from the paper with full precision
+  // The paper gives: x1 = -x2 = 0.97000436 - 0.24308753i, x3 = 0
+  // V = -0.93240737 - 0.86473146i (for x3), V1 = -V2 = -V/2
   
   const initialBodies = [
     { 
       id: 1, 
-      x: centerX + 0.97000436 * scale, 
-      y: centerY - 0.24308753 * scale, 
-      vx: vx_base * velocityScale, 
-      vy: vy_base * velocityScale, 
-      mass: 1, // Unit mass as in original solution
+      x: -0.97000436,        // Real part of x1 from paper
+      y: 0.24308753,         // Imaginary part of x1 from paper  
+      vx: 0.466203685,       // -V_real/2 = 0.93240737/2 (higher precision)
+      vy: 0.43236573,        // -V_imag/2 = 0.86473146/2 (higher precision)
+      mass: 1,               // Unit mass from paper
       color: '#ff0000' 
     },
     { 
       id: 2, 
-      x: centerX - 0.97000436 * scale, 
-      y: centerY + 0.24308753 * scale, 
-      vx: vx_base * velocityScale, 
-      vy: vy_base * velocityScale, 
-      mass: 1, // Unit mass as in original solution
+      x: 0.97000436,         // Real part of x2 = -x1 from paper
+      y: -0.24308753,        // Imaginary part of x2 = -x1 from paper
+      vx: 0.466203685,       // -V_real/2 = 0.93240737/2 (higher precision)
+      vy: 0.43236573,        // -V_imag/2 = 0.86473146/2 (higher precision)
+      mass: 1,               // Unit mass from paper
       color: '#00ff00' 
     },
     { 
       id: 3, 
-      x: centerX, 
-      y: centerY, 
-      vx: -0.93240737 * velocityScale, 
-      vy: -0.86473146 * velocityScale, 
-      mass: 1, // Unit mass as in original solution
+      x: 0,                  // x3 = 0 from paper
+      y: 0,                  // x3 = 0 from paper
+      vx: -0.93240737,       // V_real from paper (higher precision)
+      vy: -0.86473146,       // V_imag from paper (higher precision)
+      mass: 1,               // Unit mass from paper
       color: '#0000ff' 
     }
   ];
@@ -69,9 +61,10 @@ const App = () => {
     }
   }, [bodies]);
 
-  useEffect(() => {
-    console.log('Bodies updated:', bodies.map(b => ({ x: b.x.toFixed(1), y: b.y.toFixed(1) })));
-  }, [bodies]);
+  // Remove excessive logging since bodies update every frame now
+  // useEffect(() => {
+  //   console.log('Bodies updated:', bodies.map(b => ({ x: b.x.toFixed(1), y: b.y.toFixed(1) })));
+  // }, [bodies]);
 
   const handleBodyChange = (id, field, value) => {
     setBodies(prevBodies => 
@@ -82,21 +75,17 @@ const App = () => {
   };
 
   const handleRunPause = () => {
-    console.log('Run/Pause clicked, current state:', isRunning);
     setIsRunning(!isRunning);
     if (simulationRef.current) {
       if (!isRunning) {
-        console.log('Starting simulation...');
         simulationRef.current.start();
       } else {
-        console.log('Pausing simulation...');
         simulationRef.current.pause();
       }
     }
   };
 
   const handleReset = () => {
-    console.log('Reset button clicked');
     setIsRunning(false);
     setBodies(JSON.parse(JSON.stringify(initialBodies)));
     setResetTrigger(prev => prev + 1);

@@ -1,6 +1,7 @@
 # 3-Body Problem Simulator
 
 A real-time interactive visualization of the 3-body problem using Fastify backend and React frontend with HTML5 Canvas.
+Claude / AI code generated inspired by https://javalab.org/en/three_body_problem_en/
 
 ## Overview
 

@@ -1,100 +1,124 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
 
 const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed }, ref) => {
-  const animationRef = useRef(null);
+  const wsRef = useRef(null);
   const bodiesRef = useRef(bodies);
   const initialBodiesRef = useRef(JSON.parse(JSON.stringify(bodies)));
-  const timeSpeedRef = useRef(timeSpeed);
+  const isConnectedRef = useRef(false);
 
-  const G = 1; // Gravitational constant (unit value for figure-8)
-  const baseDt = 0.008; // Smaller time step for stability
+  // WebSocket connection function
+  const connectWebSocket = useRef(null);
+  
+  // Initialize WebSocket connection
+  useEffect(() => {
+    connectWebSocket.current = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // Connect to separate WebSocket server on port 3001
+      const wsUrl = `${protocol}//localhost:3001`;
+      
+      wsRef.current = new WebSocket(wsUrl);
+      
+      wsRef.current.onopen = () => {
+        isConnectedRef.current = true;
+        // Send initial bodies when connected
+        if (bodiesRef.current.length > 0) {
+          const message = {
+            type: 'set_bodies',
+            bodies: bodiesRef.current
+          };
+          wsRef.current.send(JSON.stringify(message));
+        }
+      };
+      
+      wsRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'bodies_update') {
+            onBodiesUpdate(data.bodies);
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+      
+      wsRef.current.onclose = (event) => {
+        isConnectedRef.current = false;
+        // Attempt to reconnect after 3 seconds
+        setTimeout(connectWebSocket.current, 3000);
+      };
+      
+      wsRef.current.onerror = (error) => {
+        console.error('🚨 WebSocket connection error');
+        isConnectedRef.current = false;
+      };
+    };
+    
+    connectWebSocket.current();
+    
+    // Cleanup on unmount
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [onBodiesUpdate]);
+
+  // Send message to server
+  const sendMessage = (message) => {
+    // Check if WebSocket is properly connected (readyState 1 = OPEN)
+    if (wsRef.current && wsRef.current.readyState === 1) {
+      wsRef.current.send(JSON.stringify(message));
+    } else {
+      // Try to reconnect if connection is closed
+      if (wsRef.current && wsRef.current.readyState === 3) {
+        setTimeout(() => {
+          connectWebSocket.current();
+        }, 1000);
+      }
+      
+      // If still connecting, retry after a short delay
+      if (wsRef.current && wsRef.current.readyState === 0) {
+        setTimeout(() => {
+          sendMessage(message);
+        }, 1000);
+      }
+    }
+  };
 
   useImperativeHandle(ref, () => ({
     start: () => {
-      if (!animationRef.current) {
-        animate();
-      }
+      sendMessage({ type: 'start' });
     },
     pause: () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
+      sendMessage({ type: 'pause' });
     },
     reset: () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
-      const resetBodies = JSON.parse(JSON.stringify(initialBodiesRef.current));
-      bodiesRef.current = resetBodies;
-      onBodiesUpdate(resetBodies);
+      sendMessage({ type: 'reset' });
     },
     setBodies: (newBodies) => {
       bodiesRef.current = newBodies;
       // Only update initial bodies if we're not in a simulation run
-      if (!animationRef.current) {
+      if (!isRunning) {
         initialBodiesRef.current = JSON.parse(JSON.stringify(newBodies));
       }
+      sendMessage({ type: 'set_bodies', bodies: newBodies });
     },
     setTimeSpeed: (newTimeSpeed) => {
-      timeSpeedRef.current = newTimeSpeed;
+      sendMessage({ type: 'set_time_speed', timeSpeed: newTimeSpeed });
     }
   }));
 
+  // Update bodies reference when props change
   useEffect(() => {
-    timeSpeedRef.current = timeSpeed;
-  }, [timeSpeed]);
+    bodiesRef.current = bodies;
+  }, [bodies]);
 
-  const calculateForces = (bodies) => {
-    const forces = bodies.map(() => ({ fx: 0, fy: 0 }));
-    
-    for (let i = 0; i < bodies.length; i++) {
-      for (let j = i + 1; j < bodies.length; j++) {
-        const dx = bodies[j].x - bodies[i].x;
-        const dy = bodies[j].y - bodies[i].y;
-        const r = Math.sqrt(dx * dx + dy * dy);
-        
-        // Avoid division by zero and extreme forces
-        if (r < 1) continue;
-        
-        const force = G * bodies[i].mass * bodies[j].mass / (r * r);
-        const fx = force * dx / r;
-        const fy = force * dy / r;
-        
-        forces[i].fx += fx;
-        forces[i].fy += fy;
-        forces[j].fx -= fx;
-        forces[j].fy -= fy;
-      }
+  // Send time speed updates to server
+  useEffect(() => {
+    if (isConnectedRef.current) {
+      sendMessage({ type: 'set_time_speed', timeSpeed });
     }
-    
-    return forces;
-  };
-
-  const updateBodies = (bodies) => {
-    const forces = calculateForces(bodies);
-    const dt = baseDt * timeSpeedRef.current;
-    
-    return bodies.map((body, index) => {
-      const ax = forces[index].fx / body.mass;
-      const ay = forces[index].fy / body.mass;
-      
-      return {
-        ...body,
-        vx: body.vx + ax * dt,
-        vy: body.vy + ay * dt,
-        x: body.x + body.vx * dt,
-        y: body.y + body.vy * dt
-      };
-    });
-  };
-
-  const animate = () => {
-    bodiesRef.current = updateBodies(bodiesRef.current);
-    onBodiesUpdate([...bodiesRef.current]);
-    animationRef.current = requestAnimationFrame(animate);
-  };
+  }, [timeSpeed]);
 
   return null;
 });
