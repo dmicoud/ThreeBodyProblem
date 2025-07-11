@@ -1,0 +1,71 @@
+# 3-Body Problem Simulator - Project Context
+
+## Overview
+This is an interactive 3-body problem visualization tool built with React frontend and Fastify backend. Users can configure initial conditions (position, velocity, mass) for three celestial bodies and observe their gravitational interactions in real-time.
+
+## Technology Stack
+- **Frontend**: React, HTML5 Canvas, Webpack + Babel
+- **Backend**: Fastify (Node.js) for serving static files
+- **Physics**: Custom implementation using Newton's law of universal gravitation
+- **Styling**: CSS3 with flexbox and responsive design
+
+## Key Components
+
+### Core Files
+- `src/App.js` - Main application component, state management, component coordination
+- `src/Simulation.js` - Physics engine with forwardRef for external control
+- `src/Canvas.js` - Rendering engine with trail management and 60 FPS animation
+- `src/BodyForm.js` - User interface for parameter input (position, velocity, mass)
+- `src/index.js` - React entry point
+- `src/styles.css` - Application styling
+
+### Configuration
+- `server.js` - Fastify server setup
+- `webpack.config.js` - Build configuration with Babel for JSX/ES6
+- `public/index.html` - HTML template
+
+## Physics Implementation
+- **Gravitational Force**: F = G * m1 * m2 / r² (G = 0.1 scaled for visualization)
+- **Integration**: Euler method for position/velocity updates
+- **Time Step**: dt = 0.016 * timeSpeed (60 FPS base)
+- **Collision Avoidance**: Minimum distance threshold (r < 1) prevents division by zero
+
+## Features
+- Real-time simulation with run/pause controls
+- Time speed adjustment (0.1x to 10x, logarithmic scale)
+- Adjustable motion trails (10-1000 points, logarithmic scale) with gradient fade effect
+- Toggleable velocity vectors displayed as arrows
+- Grid background for reference
+- Reset to initial conditions
+- Clear trails functionality
+
+## Default Configuration
+- Figure-eight stable 3-body problem (Chenciner-Montgomery solution)
+- Body 1 (Red): Scaled position and velocity from exact mathematical solution
+- Body 2 (Green): Symmetric counterpart to Body 1
+- Body 3 (Blue): Central position with balancing velocity
+- All bodies have equal mass (10 units for visualization)
+
+## Development Workflow
+- `npm install` - Install dependencies
+- `npm run build` - Production build
+- `npm run build:dev` - Development build
+- `npm start` - Start Fastify server (port 3000)
+- `npm run dev` - Development server with auto-reload
+
+## Common Patterns
+- State management in App.js with props passed to child components
+- Canvas rendering uses requestAnimationFrame for smooth 60 FPS
+- Physics calculations done once per frame for each body pair
+- Trail arrays managed to prevent memory issues
+- Responsive design works on desktop and mobile
+
+## Performance Notes
+- Animation uses requestAnimationFrame for optimal performance
+- Trail arrays adjustable from 10-1000 points (logarithmic scale, configurable for performance)
+- Trail rendering uses gradient fade effect for visual enhancement
+- Forces calculated efficiently (each pair only once per frame)
+- Consider WebGL for future performance improvements
+
+## Educational Purpose
+Demonstrates chaos theory - small changes in initial conditions lead to dramatically different trajectories. Perfect for exploring gravitational dynamics and the famous 3-body problem in celestial mechanics. 
