@@ -1,10 +1,19 @@
 import React, { forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
+import PhysicsEngine from './PhysicsEngine';
 
-const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed }, ref) => {
+const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, useServerComputation }, ref) => {
   const wsRef = useRef(null);
   const bodiesRef = useRef(bodies);
   const initialBodiesRef = useRef(JSON.parse(JSON.stringify(bodies)));
   const isConnectedRef = useRef(false);
+  const physicsEngineRef = useRef(new PhysicsEngine());
+  const animationIdRef = useRef(null);
+  const isClientRunningRef = useRef(false);
+
+  // Initialize initialBodiesRef with current bodies on mount
+  useEffect(() => {
+    initialBodiesRef.current = JSON.parse(JSON.stringify(bodies));
+  }, []);
 
   // WebSocket connection function
   const connectWebSocket = useRef(null);
@@ -85,40 +94,118 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed },
     }
   };
 
+  // Client-side animation loop
+  const clientAnimate = () => {
+    if (!isClientRunningRef.current) return;
+    
+    // Update physics
+    bodiesRef.current = physicsEngineRef.current.step(bodiesRef.current, timeSpeed);
+    
+    // Update bodies in parent component
+    onBodiesUpdate(bodiesRef.current);
+    
+    // Continue animation
+    animationIdRef.current = requestAnimationFrame(clientAnimate);
+  };
+
+  // Start client-side animation
+  const startClientAnimation = () => {
+    if (!isClientRunningRef.current) {
+      isClientRunningRef.current = true;
+      clientAnimate();
+    }
+  };
+
+  // Stop client-side animation
+  const stopClientAnimation = () => {
+    isClientRunningRef.current = false;
+    if (animationIdRef.current) {
+      cancelAnimationFrame(animationIdRef.current);
+      animationIdRef.current = null;
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     start: () => {
-      sendMessage({ type: 'start' });
+      if (useServerComputation) {
+        sendMessage({ type: 'start' });
+      } else {
+        startClientAnimation();
+      }
     },
     pause: () => {
-      sendMessage({ type: 'pause' });
+      if (useServerComputation) {
+        sendMessage({ type: 'pause' });
+      } else {
+        stopClientAnimation();
+      }
     },
     reset: () => {
-      sendMessage({ type: 'reset' });
+      if (useServerComputation) {
+        sendMessage({ type: 'reset' });
+      } else {
+        stopClientAnimation();
+        bodiesRef.current = JSON.parse(JSON.stringify(initialBodiesRef.current));
+        onBodiesUpdate(bodiesRef.current);
+      }
     },
     setBodies: (newBodies) => {
       bodiesRef.current = newBodies;
-      // Only update initial bodies if we're not in a simulation run
-      if (!isRunning) {
-        initialBodiesRef.current = JSON.parse(JSON.stringify(newBodies));
+      if (useServerComputation) {
+        sendMessage({ type: 'set_bodies', bodies: newBodies });
       }
-      sendMessage({ type: 'set_bodies', bodies: newBodies });
+    },
+    setInitialBodies: (newBodies) => {
+      initialBodiesRef.current = JSON.parse(JSON.stringify(newBodies));
     },
     setTimeSpeed: (newTimeSpeed) => {
-      sendMessage({ type: 'set_time_speed', timeSpeed: newTimeSpeed });
+      if (useServerComputation) {
+        sendMessage({ type: 'set_time_speed', timeSpeed: newTimeSpeed });
+      }
+      // For client-side, timeSpeed is used directly in the animation loop
     }
   }));
 
   // Update bodies reference when props change
   useEffect(() => {
     bodiesRef.current = bodies;
-  }, [bodies]);
+    // Update initial bodies when not running (user is manually setting bodies)
+    if (!isRunning) {
+      initialBodiesRef.current = JSON.parse(JSON.stringify(bodies));
+    }
+  }, [bodies, isRunning]);
 
   // Send time speed updates to server
   useEffect(() => {
-    if (isConnectedRef.current) {
+    if (isConnectedRef.current && useServerComputation) {
       sendMessage({ type: 'set_time_speed', timeSpeed });
     }
-  }, [timeSpeed]);
+  }, [timeSpeed, useServerComputation]);
+
+  // Handle switching between computation modes
+  useEffect(() => {
+    if (isRunning) {
+      // Stop current mode and start new mode
+      if (useServerComputation) {
+        stopClientAnimation();
+        sendMessage({ type: 'start' });
+      } else {
+        sendMessage({ type: 'pause' });
+        startClientAnimation();
+      }
+    } else {
+      // Make sure both modes are stopped
+      stopClientAnimation();
+      sendMessage({ type: 'pause' });
+    }
+  }, [useServerComputation, isRunning]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopClientAnimation();
+    };
+  }, []);
 
   return null;
 });

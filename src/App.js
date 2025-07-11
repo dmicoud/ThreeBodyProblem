@@ -43,8 +43,9 @@ const App = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [timeSpeed, setTimeSpeed] = useState(1);
   const [trailLength, setTrailLength] = useState(100);
-  const [showVelocityVectors, setShowVelocityVectors] = useState(true);
+  const [showVelocityVectors, setShowVelocityVectors] = useState(false);
   const [resetTrigger, setResetTrigger] = useState(0);
+  const [useServerComputation, setUseServerComputation] = useState(true);
   const simulationRef = useRef(null);
   
   // Convert between logarithmic slider value and actual speed
@@ -87,12 +88,26 @@ const App = () => {
 
   const handleReset = () => {
     setIsRunning(false);
-    setBodies(JSON.parse(JSON.stringify(initialBodies)));
     setResetTrigger(prev => prev + 1);
     if (simulationRef.current) {
+      simulationRef.current.setInitialBodies(initialBodies);
       simulationRef.current.reset();
     }
+    setBodies(JSON.parse(JSON.stringify(initialBodies)));
   };
+
+  // Handle computation mode changes
+  useEffect(() => {
+    if (isRunning && simulationRef.current) {
+      // When switching modes while running, restart the simulation with new mode
+      simulationRef.current.pause();
+      setTimeout(() => {
+        if (simulationRef.current) {
+          simulationRef.current.start();
+        }
+      }, 100);
+    }
+  }, [useServerComputation, isRunning]);
 
   return (
     <div className="app">
@@ -112,6 +127,7 @@ const App = () => {
             onBodiesUpdate={setBodies}
             isRunning={isRunning}
             timeSpeed={timeSpeed}
+            useServerComputation={useServerComputation}
           />
         </div>
         
@@ -135,6 +151,18 @@ const App = () => {
                   className="toggle-checkbox"
                 />
                 Show Velocity Vectors
+              </label>
+            </div>
+            
+            <div className="computation-toggle">
+              <label className="toggle-label">
+                <input
+                  type="checkbox"
+                  checked={useServerComputation}
+                  onChange={(e) => setUseServerComputation(e.target.checked)}
+                  className="toggle-checkbox"
+                />
+                Server-side Computation
               </label>
             </div>
             

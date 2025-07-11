@@ -4,7 +4,22 @@ const Canvas = ({ bodies, clearTrails, trailLength = 100, showVelocityVectors = 
   const canvasRef = useRef(null);
   const trailsRef = useRef([]);
   const maxTrailLength = trailLength;
-  const viewportRef = useRef({ minX: 0, maxX: 600, minY: 0, maxY: 400, scale: 50, offsetX: 300, offsetY: 200 });
+  
+  // Default viewport settings for reset - properly centered on (0,0)
+  const canvasWidth = 600;
+  const canvasHeight = 400;
+  const defaultScale = 50;
+  const defaultViewport = { 
+    minX: 0, 
+    maxX: canvasWidth, 
+    minY: 0, 
+    maxY: canvasHeight, 
+    scale: defaultScale, 
+    offsetX: canvasWidth / (2 * defaultScale), // 6 for 600/(2*50)
+    offsetY: canvasHeight / (2 * defaultScale) // 4 for 400/(2*50)
+  };
+  const viewportRef = useRef({ ...defaultViewport });
+  const viewportResetFramesRef = useRef(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -40,6 +55,12 @@ const Canvas = ({ bodies, clearTrails, trailLength = 100, showVelocityVectors = 
 
   const updateViewport = (bodies, canvasWidth, canvasHeight) => {
     if (bodies.length === 0) return;
+    
+    // Skip viewport updates for a few frames after reset (let reset viewport stay fixed)
+    if (viewportResetFramesRef.current > 0) {
+      viewportResetFramesRef.current--;
+      return;
+    }
     
     // Only use current body positions for viewport calculation (not trails)
     const bodyPositions = bodies.map(b => ({ x: b.x, y: b.y }));
@@ -321,12 +342,22 @@ const Canvas = ({ bodies, clearTrails, trailLength = 100, showVelocityVectors = 
   };
 
   const handleClearTrails = () => {
+    resetViewportAndTrails();
+  };
+
+  const resetViewport = () => {
+    viewportRef.current = { ...defaultViewport };
+    viewportResetFramesRef.current = 30; // Freeze viewport for 30 frames (~0.5 seconds at 60fps)
+  };
+
+  const resetViewportAndTrails = () => {
     trailsRef.current = [];
+    resetViewport();
   };
 
   useEffect(() => {
     if (clearTrails) {
-      trailsRef.current = [];
+      resetViewportAndTrails();
     }
   }, [clearTrails]);
 
