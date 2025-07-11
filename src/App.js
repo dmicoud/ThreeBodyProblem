@@ -24,6 +24,19 @@ const App = () => {
   const simulationRef = useRef(null);
   const canvasRef = useRef(null);
   
+  // Stability monitoring
+  const stabilityHistoryRef = useRef([]);
+  const lastStabilityCheckRef = useRef(0);
+  
+  // Stability monitoring settings
+  const [stabilitySettings, setStabilitySettings] = useState({
+    enabled: true,
+    energyThreshold: 0.1,      // 10% energy change
+    velocityThreshold: 50,     // Maximum velocity
+    positionGrowthThreshold: 5, // 5x position growth
+    positionBoundThreshold: 100 // Absolute position limit
+  });
+  
   // Dynamic slider ranges that expand when reaching boundaries
   const [speedSliderRange, setSpeedSliderRange] = useState({ min: -1, max: 1 }); // 0.1x to 10x
   const [trailSliderRange, setTrailSliderRange] = useState({ min: 1, max: 3 }); // 10 to 1000
@@ -223,7 +236,113 @@ const App = () => {
     };
   };
 
-  // Handle bodies update with collision detection
+  // Calculate system energy (kinetic + potential)
+  const calculateSystemEnergy = (bodies) => {
+    let kineticEnergy = 0;
+    let potentialEnergy = 0;
+    
+    // Kinetic energy: 0.5 * m * v^2
+    bodies.forEach(body => {
+      kineticEnergy += 0.5 * body.mass * (body.vx * body.vx + body.vy * body.vy);
+    });
+    
+    // Potential energy: -G * m1 * m2 / r
+    const G = 1; // Same as physics engine
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        const dx = bodies[i].x - bodies[j].x;
+        const dy = bodies[i].y - bodies[j].y;
+        const r = Math.sqrt(dx * dx + dy * dy);
+        if (r > 1e-10) { // Avoid division by zero
+          potentialEnergy -= G * bodies[i].mass * bodies[j].mass / r;
+        }
+      }
+    }
+    
+    return kineticEnergy + potentialEnergy;
+  };
+
+  // Check system stability
+  const checkSystemStability = (newBodies, iteration) => {
+    if (!isRunning || !stabilitySettings.enabled || iteration - lastStabilityCheckRef.current < 50) return false; // Check every 50 iterations
+    
+    lastStabilityCheckRef.current = iteration;
+    
+    // Calculate current system metrics
+    const energy = calculateSystemEnergy(newBodies);
+    const centerOfMass = calculateCenterOfMass(newBodies);
+    
+    // Calculate maximum velocity and position
+    let maxVelocity = 0;
+    let maxPosition = 0;
+    
+    newBodies.forEach(body => {
+      const velocity = Math.sqrt(body.vx * body.vx + body.vy * body.vy);
+      const position = Math.sqrt(body.x * body.x + body.y * body.y);
+      maxVelocity = Math.max(maxVelocity, velocity);
+      maxPosition = Math.max(maxPosition, position);
+    });
+    
+    // Store current state
+    const currentState = {
+      energy,
+      maxVelocity,
+      maxPosition,
+      centerOfMass,
+      iteration
+    };
+    
+    stabilityHistoryRef.current.push(currentState);
+    
+    // Keep only last 20 measurements (about 1000 iterations of history)
+    if (stabilityHistoryRef.current.length > 20) {
+      stabilityHistoryRef.current.shift();
+    }
+    
+    // Need at least 10 measurements to assess stability
+    if (stabilityHistoryRef.current.length < 10) return false;
+    
+    const history = stabilityHistoryRef.current;
+    const recent = history.slice(-5); // Last 5 measurements
+    const older = history.slice(-10, -5); // Previous 5 measurements
+    
+    // Check for dramatic energy changes (non-conservation indicates numerical instability)
+    const recentAvgEnergy = recent.reduce((sum, state) => sum + state.energy, 0) / recent.length;
+    const olderAvgEnergy = older.reduce((sum, state) => sum + state.energy, 0) / older.length;
+    const energyChange = Math.abs(recentAvgEnergy - olderAvgEnergy) / Math.abs(olderAvgEnergy);
+    
+    // Check for extreme velocities (runaway scenario)
+    const recentMaxVelocity = Math.max(...recent.map(state => state.maxVelocity));
+    const olderMaxVelocity = Math.max(...older.map(state => state.maxVelocity));
+    
+    // Check for bodies flying away (unbounded growth)
+    const recentMaxPosition = Math.max(...recent.map(state => state.maxPosition));
+    const olderMaxPosition = Math.max(...older.map(state => state.maxPosition));
+    
+    // Use configurable instability thresholds
+    const { energyThreshold, velocityThreshold, positionGrowthThreshold, positionBoundThreshold } = stabilitySettings;
+    
+    // Detect instability
+    if (energyChange > energyThreshold) {
+      return { type: 'energy', value: energyChange, threshold: energyThreshold };
+    }
+    
+    if (recentMaxVelocity > velocityThreshold) {
+      return { type: 'velocity', value: recentMaxVelocity, threshold: velocityThreshold };
+    }
+    
+    if (olderMaxPosition > 0 && recentMaxPosition / olderMaxPosition > positionGrowthThreshold) {
+      return { type: 'growth', value: recentMaxPosition / olderMaxPosition, threshold: positionGrowthThreshold };
+    }
+    
+    if (recentMaxPosition > positionBoundThreshold) {
+      return { type: 'bounds', value: recentMaxPosition, threshold: positionBoundThreshold };
+    }
+    
+    return false;
+  };
+
+  // Handle bodies update with collision detection and stability monitoring
   const handleBodiesUpdate = (newBodies, iteration) => {
     setBodies(newBodies);
     
@@ -242,6 +361,38 @@ const App = () => {
       
       // Show collision notification
       alert(`Collision detected between Body ${collision.body1} and Body ${collision.body2}!\nSimulation paused.`);
+      return;
+    }
+    
+    // Check system stability
+    if (typeof iteration === 'number') {
+      const instability = checkSystemStability(newBodies, iteration);
+      if (instability) {
+        setIsRunning(false);
+        if (simulationRef.current) {
+          simulationRef.current.pause();
+        }
+        
+        // Show instability notification with details
+        let message = 'System instability detected!\nSimulation paused.\n\n';
+        switch (instability.type) {
+          case 'energy':
+            message += `Energy conservation violated: ${(instability.value * 100).toFixed(1)}% change detected.\nThis suggests numerical errors are accumulating.`;
+            break;
+          case 'velocity':
+            message += `Extreme velocity detected: ${instability.value.toFixed(1)} units.\nBodies are accelerating uncontrollably.`;
+            break;
+          case 'growth':
+            message += `Rapid position divergence: ${instability.value.toFixed(1)}x growth rate.\nBodies are flying apart rapidly.`;
+            break;
+          case 'bounds':
+            message += `Bodies have moved too far: ${instability.value.toFixed(1)} units from origin.\nSystem has become unbounded.`;
+            break;
+        }
+        message += '\n\nTry adjusting initial conditions or reducing time speed.';
+        
+        alert(message);
+      }
     }
   };
 
@@ -270,6 +421,10 @@ const App = () => {
     setHasEverRun(false);
     setIterationCount(0);
     setResetTrigger(prev => prev + 1);
+    
+    // Reset stability monitoring
+    stabilityHistoryRef.current = [];
+    lastStabilityCheckRef.current = 0;
     
     const newBodies = JSON.parse(JSON.stringify(config.bodies));
     setBodies(newBodies);
@@ -411,6 +566,10 @@ const App = () => {
       
       setHasEverRun(false);
       setIterationCount(0);
+      
+      // Reset stability monitoring
+      stabilityHistoryRef.current = [];
+      lastStabilityCheckRef.current = 0;
       
       // Apply configuration
       setBodies(config.bodies);
@@ -564,6 +723,82 @@ const App = () => {
                 />
                 Server-side Computation
               </label>
+            </div>
+            
+            <div className="stability-control">
+              <label className="toggle-label">
+                <input
+                  type="checkbox"
+                  checked={stabilitySettings.enabled}
+                  onChange={(e) => setStabilitySettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                  className="toggle-checkbox"
+                />
+                Stability Monitoring
+              </label>
+              
+              {stabilitySettings.enabled && (
+                <div className="stability-settings">
+                  <div className="stability-setting">
+                    <label>
+                      Energy Threshold: {(stabilitySettings.energyThreshold * 100).toFixed(1)}%
+                      <input
+                        type="range"
+                        min="0.01"
+                        max="0.5"
+                        step="0.01"
+                        value={stabilitySettings.energyThreshold}
+                        onChange={(e) => setStabilitySettings(prev => ({ ...prev, energyThreshold: parseFloat(e.target.value) }))}
+                        className="stability-slider"
+                      />
+                    </label>
+                  </div>
+                  
+                  <div className="stability-setting">
+                    <label>
+                      Max Velocity: {stabilitySettings.velocityThreshold}
+                      <input
+                        type="range"
+                        min="10"
+                        max="200"
+                        step="5"
+                        value={stabilitySettings.velocityThreshold}
+                        onChange={(e) => setStabilitySettings(prev => ({ ...prev, velocityThreshold: parseInt(e.target.value) }))}
+                        className="stability-slider"
+                      />
+                    </label>
+                  </div>
+                  
+                  <div className="stability-setting">
+                    <label>
+                      Growth Rate: {stabilitySettings.positionGrowthThreshold}x
+                      <input
+                        type="range"
+                        min="2"
+                        max="20"
+                        step="1"
+                        value={stabilitySettings.positionGrowthThreshold}
+                        onChange={(e) => setStabilitySettings(prev => ({ ...prev, positionGrowthThreshold: parseInt(e.target.value) }))}
+                        className="stability-slider"
+                      />
+                    </label>
+                  </div>
+                  
+                  <div className="stability-setting">
+                    <label>
+                      Max Distance: {stabilitySettings.positionBoundThreshold}
+                      <input
+                        type="range"
+                        min="20"
+                        max="500"
+                        step="10"
+                        value={stabilitySettings.positionBoundThreshold}
+                        onChange={(e) => setStabilitySettings(prev => ({ ...prev, positionBoundThreshold: parseInt(e.target.value) }))}
+                        className="stability-slider"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
             </div>
             
             <div className="speed-control">
