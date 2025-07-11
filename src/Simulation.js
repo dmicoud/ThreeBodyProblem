@@ -22,6 +22,9 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
   // Initialize WebSocket connection
   useEffect(() => {
     connectWebSocket.current = () => {
+      // Only connect if server computation is enabled
+      if (!useServerComputation) return;
+      
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       // Connect to separate WebSocket server on port 3001
       const wsUrl = `${protocol}//localhost:3001`;
@@ -44,26 +47,33 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'bodies_update') {
-            onBodiesUpdate(data.bodies);
+            onBodiesUpdate(data.bodies, data.iterations);
           }
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          // Reduce logging - only log critical parsing errors
+          // console.error('Error parsing WebSocket message:', error);
         }
       };
       
       wsRef.current.onclose = (event) => {
         isConnectedRef.current = false;
-        // Attempt to reconnect after 3 seconds
-        setTimeout(connectWebSocket.current, 3000);
+        // Only attempt to reconnect if server computation is still enabled
+        if (useServerComputation) {
+          setTimeout(connectWebSocket.current, 3000);
+        }
       };
       
       wsRef.current.onerror = (error) => {
-        console.error('🚨 WebSocket connection error');
+        // Reduce logging - only log if needed for debugging
+        // console.error('🚨 WebSocket connection error');
         isConnectedRef.current = false;
       };
     };
     
-    connectWebSocket.current();
+    // Only connect if server computation is enabled
+    if (useServerComputation) {
+      connectWebSocket.current();
+    }
     
     // Cleanup on unmount
     return () => {
@@ -71,7 +81,7 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
         wsRef.current.close();
       }
     };
-  }, [onBodiesUpdate]);
+  }, [onBodiesUpdate, useServerComputation]);
 
   // Send message to server
   const sendMessage = (message) => {
@@ -102,8 +112,8 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
     // Update physics using current time speed
     bodiesRef.current = physicsEngineRef.current.step(bodiesRef.current, timeSpeedRef.current);
     
-    // Update bodies in parent component
-    onBodiesUpdate(bodiesRef.current);
+    // Update bodies in parent component with iteration count
+    onBodiesUpdate(bodiesRef.current, physicsEngineRef.current.getIterations());
     
     // Continue animation
     animationIdRef.current = requestAnimationFrame(clientAnimate);
@@ -146,8 +156,9 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
         sendMessage({ type: 'reset' });
       } else {
         stopClientAnimation();
+        physicsEngineRef.current.resetIterations();
         bodiesRef.current = JSON.parse(JSON.stringify(initialBodiesRef.current));
-        onBodiesUpdate(bodiesRef.current);
+        onBodiesUpdate(bodiesRef.current, 0);
       }
     },
     setBodies: (newBodies) => {
@@ -190,15 +201,27 @@ const Simulation = forwardRef(({ bodies, onBodiesUpdate, isRunning, timeSpeed, u
       // Stop current mode and start new mode
       if (useServerComputation) {
         stopClientAnimation();
+        // Connect to WebSocket if not already connected
+        if (!isConnectedRef.current) {
+          connectWebSocket.current();
+        }
         sendMessage({ type: 'start' });
       } else {
         sendMessage({ type: 'pause' });
+        // Close WebSocket when switching to client-side
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
         startClientAnimation();
       }
     } else {
       // Make sure both modes are stopped
       stopClientAnimation();
       sendMessage({ type: 'pause' });
+      // Close WebSocket when not running and not using server computation
+      if (!useServerComputation && wsRef.current) {
+        wsRef.current.close();
+      }
     }
   }, [useServerComputation, isRunning]);
 

@@ -1,32 +1,73 @@
-import React, { useRef, useEffect, useImperativeHandle } from 'react';
+import React, { useRef, useEffect, useImperativeHandle, useState } from 'react';
 
-const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showVelocityVectors = true, isRunning = false, onBodyChange }, ref) => {
+const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, infiniteTrails = false, showVelocityVectors = true, isRunning = false, onBodyChange }, ref) => {
   const canvasRef = useRef(null);
   const trailsRef = useRef([]);
   const maxTrailLength = trailLength;
   
   // Interaction state
   const isDraggingRef = useRef(false);
-  const dragModeRef = useRef(null); // 'position' or 'velocity'
+  const dragModeRef = useRef(null); // 'position', 'velocity', or 'canvas'
   const dragBodyIdRef = useRef(null);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const dragOffsetRef = useRef({ x: 0, y: 0 });
+  const canvasDragStartRef = useRef({ x: 0, y: 0 });
+  const initialViewportRef = useRef({ offsetX: 0, offsetY: 0 });
   
   // Default viewport settings for reset - properly centered on (0,0)
-  const canvasWidth = 600;
-  const canvasHeight = 400;
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const defaultScale = 50;
   const defaultViewport = { 
     minX: 0, 
-    maxX: canvasWidth, 
+    maxX: canvasSize.width, 
     minY: 0, 
-    maxY: canvasHeight, 
+    maxY: canvasSize.height, 
     scale: defaultScale, 
-    offsetX: canvasWidth / (2 * defaultScale), // 6 for 600/(2*50)
-    offsetY: canvasHeight / (2 * defaultScale) // 4 for 400/(2*50)
+    offsetX: canvasSize.width / (2 * defaultScale), 
+    offsetY: canvasSize.height / (2 * defaultScale)
   };
   const viewportRef = useRef({ ...defaultViewport });
   const viewportResetFramesRef = useRef(0);
+
+  // Update canvas size based on available space
+  useEffect(() => {
+    const updateCanvasSize = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const container = canvas.parentElement;
+      if (!container) return;
+      
+      const containerRect = container.getBoundingClientRect();
+      const padding = 30; // Account for padding and clear trails button
+      
+      const availableWidth = containerRect.width - padding;
+      const availableHeight = containerRect.height - 60; // Account for button height
+      
+      // For vertical layout, prioritize width and calculate height
+      const aspectRatio = 4 / 3; // 4:3 aspect ratio
+      let newWidth = Math.min(availableWidth, 1200); // Max width of 1200
+      let newHeight = newWidth / aspectRatio;
+      
+      // If height is too much, constrain by height
+      if (newHeight > availableHeight) {
+        newHeight = availableHeight;
+        newWidth = newHeight * aspectRatio;
+      }
+      
+      // Minimum size constraints
+      newWidth = Math.max(600, newWidth);
+      newHeight = Math.max(450, newHeight);
+      
+      setCanvasSize({ width: newWidth, height: newHeight });
+    };
+    
+    updateCanvasSize();
+    window.addEventListener('resize', updateCanvasSize);
+    
+    return () => window.removeEventListener('resize', updateCanvasSize);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -239,7 +280,8 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
       
       trailsRef.current[index].push({ x: body.x, y: body.y });
       
-      if (trailsRef.current[index].length > maxTrailLength) {
+      // Only limit trail length if not infinite
+      if (!infiniteTrails && trailsRef.current[index].length > maxTrailLength) {
         trailsRef.current[index].shift();
       }
     });
@@ -251,16 +293,29 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
         const baseColor = bodies[index]?.color || '#000000';
         ctx.lineWidth = 2 / viewportRef.current.scale; // Adjust line width for scale
         
-        // Draw trail with gradient effect - newer points more opaque
-        for (let i = 1; i < trail.length; i++) {
-          const alpha = (i / trail.length) * 0.8; // Fade from 0 to 0.8
-          ctx.globalAlpha = alpha;
+        if (infiniteTrails) {
+          // For infinite trails, draw with consistent opacity for performance
+          ctx.globalAlpha = 0.6;
           ctx.strokeStyle = baseColor;
           
           ctx.beginPath();
-          ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
-          ctx.lineTo(trail[i].x, trail[i].y);
+          ctx.moveTo(trail[0].x, trail[0].y);
+          for (let i = 1; i < trail.length; i++) {
+            ctx.lineTo(trail[i].x, trail[i].y);
+          }
           ctx.stroke();
+        } else {
+          // Draw trail with gradient effect - newer points more opaque
+          for (let i = 1; i < trail.length; i++) {
+            const alpha = (i / trail.length) * 0.8; // Fade from 0 to 0.8
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = baseColor;
+            
+            ctx.beginPath();
+            ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
+            ctx.lineTo(trail[i].x, trail[i].y);
+            ctx.stroke();
+          }
         }
         
         ctx.globalAlpha = 1;
@@ -291,13 +346,16 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
         ctx.globalAlpha = 1;
       }
       
-      // Draw body
+      // Draw body with subtle glow
       ctx.fillStyle = body.color;
+      ctx.shadowBlur = 10 / scale;
+      ctx.shadowColor = body.color;
       ctx.beginPath();
       ctx.arc(body.x, body.y, baseRadius / scale, 0, 2 * Math.PI);
       ctx.fill();
       
       // Add a border - thicker for dragged body
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = isBeingDragged ? '#ffffff' : '#000000';
       ctx.lineWidth = (isBeingDragged ? 3 : 1) / scale;
       ctx.stroke();
@@ -372,6 +430,55 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
     viewportRef.current = { ...defaultViewport };
     viewportResetFramesRef.current = 30; // Freeze viewport for 30 frames (~0.5 seconds at 60fps)
   };
+  
+  const resetZoom = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    // Reset to default zoom centered on origin
+    viewportRef.current.scale = defaultScale;
+    viewportRef.current.offsetX = canvasSize.width / (2 * defaultScale);
+    viewportRef.current.offsetY = canvasSize.height / (2 * defaultScale);
+    
+    // Force immediate redraw
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.scale(viewportRef.current.scale, viewportRef.current.scale);
+    ctx.translate(viewportRef.current.offsetX, viewportRef.current.offsetY);
+    
+    drawGrid(ctx, canvas.width / viewportRef.current.scale, canvas.height / viewportRef.current.scale);
+    updateTrails(bodies);
+    drawTrails(ctx);
+    drawBodies(ctx, bodies);
+    
+    ctx.restore();
+  };
+  
+  const centerViewport = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    // Center viewport on origin while keeping current zoom
+    viewportRef.current.offsetX = canvasSize.width / (2 * viewportRef.current.scale);
+    viewportRef.current.offsetY = canvasSize.height / (2 * viewportRef.current.scale);
+    
+    // Force immediate redraw
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.scale(viewportRef.current.scale, viewportRef.current.scale);
+    ctx.translate(viewportRef.current.offsetX, viewportRef.current.offsetY);
+    
+    drawGrid(ctx, canvas.width / viewportRef.current.scale, canvas.height / viewportRef.current.scale);
+    updateTrails(bodies);
+    drawTrails(ctx);
+    drawBodies(ctx, bodies);
+    
+    ctx.restore();
+  };
 
   const recalculateViewport = () => {
     // Force immediate viewport recalculation for new body positions
@@ -415,6 +522,24 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
         
         // Don't freeze viewport after recalculation (allow normal updates)
         viewportResetFramesRef.current = 0;
+        
+        // Force immediate canvas redraw
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Save context and apply viewport transformation
+        ctx.save();
+        ctx.scale(viewportRef.current.scale, viewportRef.current.scale);
+        ctx.translate(viewportRef.current.offsetX, viewportRef.current.offsetY);
+        
+        // Draw grid
+        drawGrid(ctx, canvas.width / viewportRef.current.scale, canvas.height / viewportRef.current.scale);
+        
+        // Draw bodies
+        drawBodies(ctx, bodies);
+        
+        // Restore context
+        ctx.restore();
       }
     }
   };
@@ -516,6 +641,7 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
     const body = findBodyAtPosition(worldX, worldY);
     
     if (body) {
+      // Body or velocity vector dragging
       isDraggingRef.current = true;
       dragBodyIdRef.current = body.id;
       dragStartRef.current = { x: worldX, y: worldY };
@@ -529,26 +655,154 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
       }
       
       event.preventDefault();
+    } else {
+      // Canvas dragging (panning)
+      isDraggingRef.current = true;
+      dragModeRef.current = 'canvas';
+      setIsDraggingCanvas(true);
+      
+      // Store initial mouse position in screen coordinates
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      canvasDragStartRef.current = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+      
+      // Store initial viewport offset
+      initialViewportRef.current = {
+        offsetX: viewportRef.current.offsetX,
+        offsetY: viewportRef.current.offsetY
+      };
+      
+      event.preventDefault();
     }
+  };
+  
+  // Mouse wheel zoom handler
+  const handleMouseWheel = (event) => {
+    event.preventDefault();
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    
+    // Convert mouse position to world coordinates before zoom
+    const viewport = viewportRef.current;
+    const worldX = (mouseX / viewport.scale) - viewport.offsetX;
+    const worldY = (mouseY / viewport.scale) - viewport.offsetY;
+    
+    // Zoom factor
+    const zoomFactor = event.deltaY > 0 ? 0.9 : 1.1; // Zoom out/in
+    const newScale = viewport.scale * zoomFactor;
+    
+    // Apply zoom limits
+    const minScale = 0.1;
+    const maxScale = 500;
+    const clampedScale = Math.max(minScale, Math.min(newScale, maxScale));
+    
+    // Calculate new offsets to zoom around mouse position
+    const newOffsetX = (mouseX / clampedScale) - worldX;
+    const newOffsetY = (mouseY / clampedScale) - worldY;
+    
+    // Update viewport
+    viewport.scale = clampedScale;
+    viewport.offsetX = newOffsetX;
+    viewport.offsetY = newOffsetY;
+    
+    // Force immediate redraw
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Save context and apply viewport transformation
+    ctx.save();
+    ctx.scale(viewport.scale, viewport.scale);
+    ctx.translate(viewport.offsetX, viewport.offsetY);
+    
+    // Draw grid
+    drawGrid(ctx, canvas.width / viewport.scale, canvas.height / viewport.scale);
+    
+    // Update trails
+    updateTrails(bodies);
+    
+    // Draw trails
+    drawTrails(ctx);
+    
+    // Draw bodies
+    drawBodies(ctx, bodies);
+    
+    // Restore context
+    ctx.restore();
   };
 
   const handleMouseMove = (event) => {
     if (!isDraggingRef.current || isRunning) return;
     
-    const { x: worldX, y: worldY } = screenToWorld(event.clientX, event.clientY);
-    const body = bodies.find(b => b.id === dragBodyIdRef.current);
-    
-    if (body && onBodyChange) {
-      if (dragModeRef.current === 'position') {
-        const newX = worldX - dragOffsetRef.current.x;
-        const newY = worldY - dragOffsetRef.current.y;
-        onBodyChange(body.id, 'x', newX);
-        onBodyChange(body.id, 'y', newY);
-      } else if (dragModeRef.current === 'velocity') {
-        const newVx = (worldX - body.x) / 0.5; // Inverse of vector scale
-        const newVy = (worldY - body.y) / 0.5;
-        onBodyChange(body.id, 'vx', newVx);
-        onBodyChange(body.id, 'vy', newVy);
+    if (dragModeRef.current === 'canvas') {
+      // Canvas panning
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const currentMouseX = event.clientX - rect.left;
+      const currentMouseY = event.clientY - rect.top;
+      
+      // Calculate mouse delta in screen coordinates
+      const deltaX = currentMouseX - canvasDragStartRef.current.x;
+      const deltaY = currentMouseY - canvasDragStartRef.current.y;
+      
+      // Convert screen delta to world delta (divide by scale)
+      const worldDeltaX = deltaX / viewportRef.current.scale;
+      const worldDeltaY = deltaY / viewportRef.current.scale;
+      
+      // Update viewport offset (pan in opposite direction to mouse movement)
+      viewportRef.current.offsetX = initialViewportRef.current.offsetX + worldDeltaX;
+      viewportRef.current.offsetY = initialViewportRef.current.offsetY + worldDeltaY;
+      
+      // Force immediate redraw
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Save context and apply viewport transformation
+      ctx.save();
+      ctx.scale(viewportRef.current.scale, viewportRef.current.scale);
+      ctx.translate(viewportRef.current.offsetX, viewportRef.current.offsetY);
+      
+      // Draw grid
+      drawGrid(ctx, canvas.width / viewportRef.current.scale, canvas.height / viewportRef.current.scale);
+      
+      // Update trails
+      updateTrails(bodies);
+      
+      // Draw trails
+      drawTrails(ctx);
+      
+      // Draw bodies
+      drawBodies(ctx, bodies);
+      
+      // Restore context
+      ctx.restore();
+      
+    } else {
+      // Body or velocity vector dragging
+      const { x: worldX, y: worldY } = screenToWorld(event.clientX, event.clientY);
+      const body = bodies.find(b => b.id === dragBodyIdRef.current);
+      
+      if (body && onBodyChange) {
+        if (dragModeRef.current === 'position') {
+          const newX = worldX - dragOffsetRef.current.x;
+          const newY = worldY - dragOffsetRef.current.y;
+          onBodyChange(body.id, 'x', newX);
+          onBodyChange(body.id, 'y', newY);
+        } else if (dragModeRef.current === 'velocity') {
+          const newVx = (worldX - body.x) / 0.5; // Inverse of vector scale
+          const newVy = (worldY - body.y) / 0.5;
+          onBodyChange(body.id, 'vx', newVx);
+          onBodyChange(body.id, 'vy', newVy);
+        }
       }
     }
   };
@@ -557,9 +811,62 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
     isDraggingRef.current = false;
     dragModeRef.current = null;
     dragBodyIdRef.current = null;
+    setIsDraggingCanvas(false);
   };
 
-  // Add mouse event listeners
+  // Keyboard zoom handler
+  const handleKeyPress = (event) => {
+    // Only handle zoom keys if not typing in an input field
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+      return;
+    }
+    
+    if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      // Zoom in at center
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      
+      const mockEvent = {
+        preventDefault: () => {},
+        clientX: centerX + canvas.getBoundingClientRect().left,
+        clientY: centerY + canvas.getBoundingClientRect().top,
+        deltaY: -100 // Negative for zoom in
+      };
+      
+      handleMouseWheel(mockEvent);
+    } else if (event.key === '-' || event.key === '_') {
+      event.preventDefault();
+      // Zoom out at center
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      
+      const mockEvent = {
+        preventDefault: () => {},
+        clientX: centerX + canvas.getBoundingClientRect().left,
+        clientY: centerY + canvas.getBoundingClientRect().top,
+        deltaY: 100 // Positive for zoom out
+      };
+      
+      handleMouseWheel(mockEvent);
+    } else if (event.key === 'r' || event.key === 'R') {
+      event.preventDefault();
+      // Reset zoom
+      resetZoom();
+    } else if (event.key === 'c' || event.key === 'C') {
+      event.preventDefault();
+      // Center viewport
+      centerViewport();
+    }
+  };
+
+  // Add mouse and keyboard event listeners
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -568,12 +875,18 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
+    canvas.addEventListener('wheel', handleMouseWheel, { passive: false });
+    
+    // Add keyboard listeners to document for global access
+    document.addEventListener('keydown', handleKeyPress);
     
     return () => {
       canvas.removeEventListener('mousedown', handleMouseDown);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseUp);
+      canvas.removeEventListener('wheel', handleMouseWheel);
+      document.removeEventListener('keydown', handleKeyPress);
     };
   }, [bodies, showVelocityVectors, isRunning, onBodyChange]);
 
@@ -581,23 +894,35 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, showV
   useImperativeHandle(ref, () => ({
     recalculateViewport,
     resetViewport,
-    resetViewportAndTrails
+    resetViewportAndTrails,
+    resetZoom,
+    centerViewport,
+    getCurrentScale: () => viewportRef.current.scale
   }));
 
   return (
     <div className="canvas-container">
       <canvas
         ref={canvasRef}
-        width={600}
-        height={400}
+        width={canvasSize.width}
+        height={canvasSize.height}
         className="simulation-canvas"
         style={{ 
-          cursor: isRunning ? 'default' : (showVelocityVectors ? 'grab' : 'move')
+          cursor: isRunning ? 'default' : 
+                  isDraggingCanvas ? 'grabbing' : 'grab'
         }}
       />
-      <button onClick={handleClearTrails} className="clear-trails-button">
-        Clear Trails
-      </button>
+      <div className="canvas-controls">
+        <button onClick={handleClearTrails} className="clear-trails-button">
+          Clear Trails
+        </button>
+        <button onClick={resetZoom} className="zoom-reset-button">
+          Reset Zoom
+        </button>
+        <button onClick={centerViewport} className="center-button">
+          Center
+        </button>
+      </div>
     </div>
   );
 });

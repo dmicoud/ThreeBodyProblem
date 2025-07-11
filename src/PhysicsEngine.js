@@ -2,6 +2,7 @@ class PhysicsEngine {
   constructor() {
     this.G = 1; // Gravitational constant (unit value for figure-8, matches paper)
     this.baseDt = 0.001; // Much smaller time step for stability
+    this.iterations = 0; // Track total iterations
   }
 
   calculateAccelerations(bodies) {
@@ -15,7 +16,8 @@ class PhysicsEngine {
         
         // Avoid division by zero - use very small threshold
         if (r < 1e-10) {
-          console.log(`Warning: Bodies ${i} and ${j} extremely close, r=${r.toExponential(3)}`);
+          // Reduce logging - only log if needed for debugging
+          // console.log(`Warning: Bodies ${i} and ${j} extremely close, r=${r.toExponential(3)}`);
           continue;
         }
         
@@ -75,12 +77,13 @@ class PhysicsEngine {
 
       // Debug logging for extreme values - only warn for very high velocities
       if (Math.abs(newBody.vx) > 5 || Math.abs(newBody.vy) > 5) {
-        console.log(`Warning: Very high velocity for body ${index}:`, {
-          vx: newBody.vx.toFixed(3),
-          vy: newBody.vy.toFixed(3),
-          x: newBody.x.toFixed(3),
-          y: newBody.y.toFixed(3)
-        });
+        // Reduce logging - only log if needed for debugging
+        // console.log(`Warning: Very high velocity for body ${index}:`, {
+        //   vx: newBody.vx.toFixed(3),
+        //   vy: newBody.vy.toFixed(3),
+        //   x: newBody.x.toFixed(3),
+        //   y: newBody.y.toFixed(3)
+        // });
       }
 
       return newBody;
@@ -94,9 +97,20 @@ class PhysicsEngine {
     
     for (let i = 0; i < steps; i++) {
       currentBodies = this.updateBodiesRK4(currentBodies, timeSpeed);
+      this.iterations++;
     }
     
     return currentBodies;
+  }
+
+  // Reset iteration counter
+  resetIterations() {
+    this.iterations = 0;
+  }
+
+  // Get current iteration count
+  getIterations() {
+    return this.iterations;
   }
 }
 

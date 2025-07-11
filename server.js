@@ -20,12 +20,14 @@ class PhysicsSimulation {
     this.G = 1; // Gravitational constant (unit value for figure-8, matches paper)
     this.baseDt = 0.001; // Much smaller time step for stability
     this.connections = new Set(); // Track WebSocket connections
+    this.iterations = 0; // Track total iterations
   }
 
   setBodies(bodies) {
     this.bodies = JSON.parse(JSON.stringify(bodies));
     this.initialBodies = JSON.parse(JSON.stringify(bodies));
-    this.broadcast({ type: 'bodies_update', bodies: this.bodies });
+    this.iterations = 0; // Reset iteration count when setting new bodies
+    this.broadcast({ type: 'bodies_update', bodies: this.bodies, iterations: this.iterations });
     // No logging for routine body updates during simulation
   }
 
@@ -53,7 +55,8 @@ class PhysicsSimulation {
   reset() {
     this.pause();
     this.bodies = JSON.parse(JSON.stringify(this.initialBodies));
-    this.broadcast({ type: 'bodies_update', bodies: this.bodies });
+    this.iterations = 0; // Reset iteration count
+    this.broadcast({ type: 'bodies_update', bodies: this.bodies, iterations: this.iterations });
     // No logging for reset
   }
 
@@ -68,7 +71,8 @@ class PhysicsSimulation {
         
         // Avoid division by zero - use very small threshold
         if (r < 1e-10) {
-          console.log(`Warning: Bodies ${i} and ${j} extremely close, r=${r.toExponential(3)}`);
+          // Reduce logging - only log if needed for debugging
+          // console.log(`Warning: Bodies ${i} and ${j} extremely close, r=${r.toExponential(3)}`);
           continue;
         }
         
@@ -147,9 +151,10 @@ class PhysicsSimulation {
     const steps = 5;
     for (let i = 0; i < steps; i++) {
       this.bodies = this.updateBodiesRK4(this.bodies);
+      this.iterations++;
     }
     
-    this.broadcast({ type: 'bodies_update', bodies: this.bodies });
+    this.broadcast({ type: 'bodies_update', bodies: this.bodies, iterations: this.iterations });
     
     // Use setTimeout instead of requestAnimationFrame for server-side control
     this.animationId = setTimeout(() => this.animate(), 16); // ~60 FPS
@@ -157,17 +162,17 @@ class PhysicsSimulation {
 
   addConnection(ws) {
     this.connections.add(ws);
-    // Only log when first connection is made or significant changes
+    // Reduce logging - only log significant changes
     if (this.connections.size === 1) {
-      console.log('First WebSocket client connected');
+      console.log('🔵 WebSocket client connected');
     }
   }
 
   removeConnection(ws) {
     this.connections.delete(ws);
-    // Only log when last connection is removed
+    // Reduce logging - only log when all clients disconnect
     if (this.connections.size === 0) {
-      console.log('All WebSocket clients disconnected');
+      console.log('🔴 All WebSocket clients disconnected');
     }
   }
 
@@ -192,8 +197,7 @@ const wss = new WebSocket.Server({ port: 3001 });
 console.log('WebSocket server running on ws://localhost:3001');
 
 wss.on('connection', function connection(ws) {
-  console.log('🔵 Client connected');
-  
+  // Reduce logging - only log through simulation.addConnection
   simulation.addConnection(ws);
   
   ws.on('message', function incoming(message) {
@@ -230,7 +234,7 @@ wss.on('connection', function connection(ws) {
   });
   
   ws.on('close', function close() {
-    console.log('🔴 Client disconnected');
+    // Reduce logging - only log through simulation.removeConnection
     simulation.removeConnection(ws);
   });
   
