@@ -14,12 +14,7 @@ class PhysicsEngine {
         const dy = bodies[j].y - bodies[i].y;
         const r = Math.sqrt(dx * dx + dy * dy);
         
-        // Avoid division by zero - use very small threshold
-        if (r < 1e-10) {
-          // Reduce logging - only log if needed for debugging
-          // console.log(`Warning: Bodies ${i} and ${j} extremely close, r=${r.toExponential(3)}`);
-          continue;
-        }
+        // Collision detection disabled - allow all force calculations
         
         const force = this.G * bodies[i].mass * bodies[j].mass / (r * r);
         const fx = force * dx / r;

@@ -897,7 +897,12 @@ const Canvas = React.forwardRef(({ bodies, clearTrails, trailLength = 100, infin
     resetViewportAndTrails,
     resetZoom,
     centerViewport,
-    getCurrentScale: () => viewportRef.current.scale
+    getCurrentScale: () => viewportRef.current.scale,
+    setScale: (scale) => {
+      viewportRef.current.scale = scale;
+      viewportRef.current.offsetX = canvasSize.width / (2 * scale);
+      viewportRef.current.offsetY = canvasSize.height / (2 * scale);
+    }
   }));
 
   return (

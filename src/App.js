@@ -15,7 +15,7 @@ const App = () => {
   const [resetTrigger, setResetTrigger] = useState(0);
   const [useServerComputation, setUseServerComputation] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [configModalMode, setConfigModalMode] = useState('export'); // 'export' or 'import'
+  const [configModalMode, setConfigModalMode] = useState('export'); // 'export', 'import', or 'saved'
   const [configText, setConfigText] = useState('');
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
   const [hasEverRun, setHasEverRun] = useState(false);
@@ -28,14 +28,19 @@ const App = () => {
   const stabilityHistoryRef = useRef([]);
   const lastStabilityCheckRef = useRef(0);
   
+  // Auto-saved configurations
+  const [savedConfigurations, setSavedConfigurations] = useState([]);
+  
   // Stability monitoring settings
   const [stabilitySettings, setStabilitySettings] = useState({
     enabled: true,
-    energyThreshold: 0.25,     // 25% energy change (more relaxed)
+    energyThreshold: 0.5,      // 50% energy change (very permissive)
     velocityThreshold: 100,    // Maximum velocity (doubled)
     positionGrowthThreshold: 10, // 10x position growth (doubled)
-    positionBoundThreshold: 250 // Absolute position limit (2.5x higher)
+    positionBoundThreshold: 50  // Reduced absolute position limit
   });
+  
+  // Collision detection permanently disabled
   
   // Dynamic slider ranges that expand when reaching boundaries
   const [speedSliderRange, setSpeedSliderRange] = useState({ min: -1, max: 1 }); // 0.1x to 10x
@@ -175,47 +180,9 @@ const App = () => {
     );
   };
   
-  // Check for collisions between bodies using actual visual sizes
+  // Collision detection completely disabled
   const checkCollisions = (newBodies) => {
-    if (!isRunning || newBodies.length < 2) return false;
-    
-    // Get current viewport scale from canvas
-    const currentScale = canvasRef.current?.getCurrentScale() || 50;
-    
-    for (let i = 0; i < newBodies.length; i++) {
-      for (let j = i + 1; j < newBodies.length; j++) {
-        const body1 = newBodies[i];
-        const body2 = newBodies[j];
-        
-        const dx = body1.x - body2.x;
-        const dy = body1.y - body2.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        // Calculate visual radius exactly as in Canvas.js drawBodies function
-        let baseRadius1 = Math.sqrt(body1.mass) * 6;
-        let baseRadius2 = Math.sqrt(body2.mass) * 6;
-        
-        // Apply same scaling logic as Canvas.js
-        if (currentScale > 20) {
-          baseRadius1 *= 0.8;
-          baseRadius2 *= 0.8;
-        } else if (currentScale < 5) {
-          baseRadius1 *= 1.6;
-          baseRadius2 *= 1.6;
-        }
-        
-        // Convert to world coordinates (same as visual rendering)
-        const worldRadius1 = baseRadius1 / currentScale;
-        const worldRadius2 = baseRadius2 / currentScale;
-        const collisionDistance = worldRadius1 + worldRadius2;
-        
-        if (distance < collisionDistance) {
-          return { body1: body1.id, body2: body2.id, distance };
-        }
-      }
-    }
-    
-    return false;
+    return false; // Always return false - no collision detection
   };
   
   // Calculate center of mass
@@ -342,6 +309,44 @@ const App = () => {
     return false;
   };
 
+  // Auto-save configuration when simulation is paused
+  const autoSaveConfiguration = (reason = 'manual') => {
+    const timestamp = new Date().toISOString();
+    const config = {
+      bodies: bodies.map(body => ({
+        id: body.id,
+        x: parseFloat(body.x.toFixed(6)),
+        y: parseFloat(body.y.toFixed(6)),
+        vx: parseFloat(body.vx.toFixed(6)),
+        vy: parseFloat(body.vy.toFixed(6)),
+        mass: parseFloat(body.mass.toFixed(6)),
+        color: body.color
+      })),
+      settings: {
+        timeSpeed,
+        trailLength,
+        infiniteTrails,
+        showVelocityVectors,
+        useServerComputation
+      },
+      autoSavedAt: timestamp,
+      reason: reason,
+      iterations: iterationCount,
+      description: `Auto-saved configuration (${reason})`
+    };
+    
+    setSavedConfigurations(prev => {
+      const newConfigs = [...prev, config];
+      // Keep only the last 10 auto-saved configurations
+      if (newConfigs.length > 10) {
+        newConfigs.shift();
+      }
+      return newConfigs;
+    });
+    
+    return config;
+  };
+
   // Handle bodies update with collision detection and stability monitoring
   const handleBodiesUpdate = (newBodies, iteration) => {
     setBodies(newBodies);
@@ -351,18 +356,7 @@ const App = () => {
       setIterationCount(iteration);
     }
     
-    // Check for collisions
-    const collision = checkCollisions(newBodies);
-    if (collision) {
-      setIsRunning(false);
-      if (simulationRef.current) {
-        simulationRef.current.pause();
-      }
-      
-      // Show collision notification
-      alert(`Collision detected between Body ${collision.body1} and Body ${collision.body2}!\nSimulation paused.`);
-      return;
-    }
+    // Collision detection is completely disabled
     
     // Check system stability
     if (typeof iteration === 'number') {
@@ -372,6 +366,9 @@ const App = () => {
         if (simulationRef.current) {
           simulationRef.current.pause();
         }
+        
+        // Auto-save configuration when instability occurs
+        autoSaveConfiguration('instability');
         
         // Show instability notification with details
         let message = 'System instability detected!\nSimulation paused.\n\n';
@@ -402,6 +399,11 @@ const App = () => {
     
     if (newRunState) {
       setHasEverRun(true);
+    } else {
+      // Auto-save configuration when manually pausing
+      if (hasEverRun) {
+        autoSaveConfiguration('manual');
+      }
     }
     
     if (simulationRef.current) {
@@ -459,6 +461,11 @@ const App = () => {
     setTimeout(() => {
       if (canvasRef.current) {
         canvasRef.current.recalculateViewport();
+        
+        // Apply custom scale if specified in configuration
+        if (config.settings && typeof config.settings.defaultScale === 'number') {
+          canvasRef.current.setScale(config.settings.defaultScale);
+        }
       }
     }, 0);
   };
@@ -526,6 +533,68 @@ const App = () => {
     setConfigText('');
     setConfigModalMode('import');
     setShowConfigModal(true);
+  };
+
+  // View saved configurations
+  const handleViewSavedConfigs = () => {
+    setConfigModalMode('saved');
+    setShowConfigModal(true);
+  };
+
+  // Load a saved configuration
+  const handleLoadSavedConfig = (config) => {
+    // Stop simulation if running
+    if (isRunning) {
+      setIsRunning(false);
+      if (simulationRef.current) {
+        simulationRef.current.pause();
+      }
+    }
+    
+    setHasEverRun(false);
+    setIterationCount(0);
+    
+    // Reset stability monitoring
+    stabilityHistoryRef.current = [];
+    lastStabilityCheckRef.current = 0;
+    
+    // Apply configuration
+    setBodies(config.bodies);
+    if (config.settings) {
+      if (typeof config.settings.timeSpeed === 'number') setTimeSpeed(Math.min(config.settings.timeSpeed, 10000));
+      if (typeof config.settings.trailLength === 'number') setTrailLength(config.settings.trailLength);
+      if (typeof config.settings.infiniteTrails === 'boolean') setInfiniteTrails(config.settings.infiniteTrails);
+      if (typeof config.settings.showVelocityVectors === 'boolean') setShowVelocityVectors(config.settings.showVelocityVectors);
+      if (typeof config.settings.useServerComputation === 'boolean') setUseServerComputation(config.settings.useServerComputation);
+    }
+    
+    // Reset simulation with new configuration
+    setResetTrigger(prev => prev + 1);
+    if (simulationRef.current) {
+      simulationRef.current.setInitialBodies(config.bodies);
+      simulationRef.current.reset();
+    }
+    
+    // Trigger viewport recalculation on next frame after state updates
+    setTimeout(() => {
+      if (canvasRef.current) {
+        canvasRef.current.recalculateViewport();
+      }
+    }, 0);
+    
+    setShowConfigModal(false);
+  };
+
+  // Delete a saved configuration
+  const handleDeleteSavedConfig = (index) => {
+    setSavedConfigurations(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Clear all saved configurations
+  const handleClearAllSavedConfigs = () => {
+    if (confirm('Are you sure you want to clear all saved configurations?')) {
+      setSavedConfigurations([]);
+    }
   };
 
   // Apply imported configuration
@@ -700,6 +769,14 @@ const App = () => {
             >
               Import Config
             </button>
+            <button 
+              onClick={handleViewSavedConfigs} 
+              className="control-button saved-config-button"
+              disabled={isRunning}
+              title={`View saved configurations (${savedConfigurations.length})`}
+            >
+              Saved ({savedConfigurations.length})
+            </button>
             
             <div className="velocity-toggle">
               <label className="toggle-label">
@@ -724,6 +801,7 @@ const App = () => {
                 Server-side Computation
               </label>
             </div>
+            
             
             <div className="stability-control">
               <label className="toggle-label">
@@ -788,9 +866,9 @@ const App = () => {
                       Max Distance: {stabilitySettings.positionBoundThreshold}
                       <input
                         type="range"
-                        min="20"
+                        min="10"
                         max="500"
-                        step="10"
+                        step="5"
                         value={stabilitySettings.positionBoundThreshold}
                         onChange={(e) => setStabilitySettings(prev => ({ ...prev, positionBoundThreshold: parseInt(e.target.value) }))}
                         className="stability-slider"
@@ -862,7 +940,9 @@ const App = () => {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>
-                {configModalMode === 'export' ? 'Export Configuration' : 'Import Configuration'}
+                {configModalMode === 'export' ? 'Export Configuration' : 
+                 configModalMode === 'import' ? 'Import Configuration' : 
+                 'Saved Configurations'}
               </h3>
               <button 
                 className="modal-close" 
@@ -891,7 +971,7 @@ const App = () => {
                     </button>
                   </div>
                 </>
-              ) : (
+              ) : configModalMode === 'import' ? (
                 <>
                   <p>Paste a configuration JSON to load a saved system state:</p>
                   <textarea
@@ -911,6 +991,65 @@ const App = () => {
                     </button>
                     <button onClick={() => setShowConfigModal(false)} className="control-button">
                       Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>Auto-saved configurations from simulation sessions:</p>
+                  {savedConfigurations.length === 0 ? (
+                    <div className="no-saved-configs">
+                      <p>No saved configurations yet. Configurations are automatically saved when you pause the simulation.</p>
+                    </div>
+                  ) : (
+                    <div className="saved-configs-list">
+                      {savedConfigurations.map((config, index) => (
+                        <div key={index} className="saved-config-item">
+                          <div className="saved-config-header">
+                            <div className="saved-config-info">
+                              <div className="saved-config-title">
+                                {config.reason === 'manual' ? '✋ Manual Pause' : 
+                                 config.reason === 'collision' ? '💥 Collision' : 
+                                 config.reason === 'instability' ? '⚠️ Instability' : '📁 Saved'}
+                              </div>
+                              <div className="saved-config-details">
+                                <span>{new Date(config.autoSavedAt).toLocaleString()}</span>
+                                <span>• {config.iterations?.toLocaleString() || 0} iterations</span>
+                                <span>• {config.settings?.timeSpeed || 1}x speed</span>
+                              </div>
+                            </div>
+                            <div className="saved-config-actions">
+                              <button 
+                                onClick={() => handleLoadSavedConfig(config)}
+                                className="control-button load-config-button"
+                                title="Load this configuration"
+                              >
+                                Load
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteSavedConfig(index)}
+                                className="control-button delete-config-button"
+                                title="Delete this configuration"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="modal-buttons">
+                    {savedConfigurations.length > 0 && (
+                      <button 
+                        onClick={handleClearAllSavedConfigs} 
+                        className="control-button delete-all-button"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                    <button onClick={() => setShowConfigModal(false)} className="control-button">
+                      Close
                     </button>
                   </div>
                 </>
